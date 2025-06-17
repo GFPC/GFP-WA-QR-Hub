@@ -1,0 +1,9 @@
+POST http://localhost:8010/api/bots
+Content-Type: application/json
+X-API-Key: 123
+
+{
+    "id": "123",
+    "name": "test",
+    "description": "test"
+}
