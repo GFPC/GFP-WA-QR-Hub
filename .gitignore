@@ -40,3 +40,6 @@ logs/
 
 # Alembic
 db/migrations/versions/
+
+.idea
+logs

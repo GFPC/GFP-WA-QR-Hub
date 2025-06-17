@@ -83,6 +83,13 @@ class UserRepository:
         
         return user
     
+    async def get_user_by_tg_id(self, tg_id: int) -> Optional[User]:
+        """Get a user by Telegram ID, return None if not found"""
+        result = await self.session.execute(
+            select(User).where(User.tg_id == tg_id)
+        )
+        return result.scalar_one_or_none()
+    
     async def get_user_bots(self, tg_id: int) -> List[Bot]:
         result = await self.session.execute(
             select(User)
@@ -107,4 +114,11 @@ class UserRepository:
             .values(data=data)
         )
         await self.session.commit()
-        logger.info(f"Updated data for user: {tg_id}") 
+        logger.info(f"Updated data for user: {tg_id}")
+
+    async def is_admin(self, tg_id: int) -> bool:
+        result = await self.session.execute(
+            select(User.data).where(User.tg_id == tg_id)
+        )
+        user_data = result.scalar_one_or_none()
+        return user_data and user_data.get("is_admin", False) 

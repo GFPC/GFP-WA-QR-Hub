@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     REDIS_URL: Optional[str] = None
     
     # Logging
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = "DEBUG"
     
     class Config:
         env_file = ".env"

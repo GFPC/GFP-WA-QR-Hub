@@ -49,25 +49,18 @@ async def handle_auth_qr(callback: CallbackQuery, db: AsyncSession):
         return
     
     try:
-        # Преобразуем QR данные в формат, подходящий для Telegram
-        qr_data = bot.current_qr
+        # Используем данные QR напрямую из БД, без перекодирований
+        qr_data_string = bot.current_qr
+        print(f"DEBUG: QR data string being used for generation: {qr_data_string}")
         
-        # Если QR приходит в формате WhatsApp (строка с запятыми)
-        if ',' in qr_data:
-            # Берем первую часть QR кода (до первой запятой)
-            qr_data = qr_data.split(',')[0]
-        
-        # Декодируем base64 в бинарные данные
-        qr_bytes = base64.b64decode(qr_data)
-        
-        # Создаем QR код из данных
+        # Создаем QR код из данных (строки)
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
             box_size=10,
             border=4,
         )
-        qr.add_data(qr_bytes)
+        qr.add_data(qr_data_string) # <-- Здесь передаем чистую строку из БД
         qr.make(fit=True)
         
         # Создаем изображение QR кода
@@ -109,8 +102,8 @@ async def handle_unlink_bot(callback: CallbackQuery, db: AsyncSession):
     
     # Remove association between user and bot
     result = await db.execute(
-        "DELETE FROM users_bots_mul WHERE user_id = ? AND bot_id = ?",
-        (callback.from_user.id, bot_id)
+        text("DELETE FROM users_bots_mul WHERE user_id = :user_id AND bot_id = :bot_id"),
+        {"user_id": callback.from_user.id, "bot_id": bot_id},
     )
     await db.commit()
     

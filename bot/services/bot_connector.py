@@ -13,8 +13,9 @@ class BotConnector:
         self.bot = Bot(token=settings.BOT_TOKEN.get_secret_value())
         self.dp = Dispatcher(storage=MemoryStorage())
         
-        # Register middleware
-        self.dp.update.middleware(DatabaseMiddleware())
+        # Register middleware explicitly for messages and callback queries
+        self.dp.message.middleware(DatabaseMiddleware())
+        self.dp.callback_query.middleware(DatabaseMiddleware())
         
         # Register handlers
         self.dp.include_router(commands.router)

@@ -13,8 +13,8 @@ router = Router()
 @router.message(Command("start"))
 async def cmd_start(message: Message, db: AsyncSession):
     """Handle /start command"""
-    user_repo = UserRepository(db)
-    await user_repo.get_or_create_user(message.from_user.id)
+    # user_repo = UserRepository(db) # Не нужно, пользователь уже проверен мидлварью
+    # await user_repo.get_or_create_user(message.from_user.id) # Удаляем автоматическую регистрацию
     
     await message.answer(
         "👋 Welcome to GFP Watcher-QR!\n\n"
@@ -30,7 +30,8 @@ async def cmd_help(message: Message):
         "📚 Available commands:\n\n"
         "/list_bots - Show your linked bots\n"
         "/list_unlinked_bots - Show available bots to link\n"
-        "/help - Show this help message"
+        "/help - Show this help message\n"
+        "/invite <user_id> - Add a user to the bot (Admin only)"
     )
     await message.answer(help_text)
 
@@ -101,14 +102,17 @@ async def cmd_list_unlinked_bots(message: Message, db: AsyncSession):
     if not bots:
         await message.answer("No unlinked bots available.")
         return
-    
+
     # Send each bot in a separate message
     for bot in bots:
+        status_emoji = "✅" if bot.authed else "❌"
+        status_text = "Authenticated" if bot.authed else "Not authenticated"
         # Create message text with formatting
         text = (
             f"🤖 <b>{bot.name}</b>\n\n"
-            f"<code>ID: {bot.id}</code>\n"
-            f"📝 <i>{bot.description}</i>"
+            f"ID: <code> {bot.id}</code>\n"
+            f"📝 <i>{bot.description}</i>\n"
+            f"{status_emoji} <b>Status:</b> {status_text}"
         )
         
         # Create inline keyboard with link button
@@ -123,4 +127,42 @@ async def cmd_list_unlinked_bots(message: Message, db: AsyncSession):
             text,
             reply_markup=kb.as_markup(),
             parse_mode="HTML"
-        ) 
+        )
+
+
+@router.message(Command("invite"))
+async def cmd_invite(message: Message, db: AsyncSession):
+    """Handle /invite command to add a user by tg_id"""
+    user_repo = UserRepository(db)
+
+    # Проверяем, является ли отправитель команды администратором
+    if not await user_repo.is_admin(message.from_user.id):
+        await message.answer("❌ You are not authorized to use this command.")
+        logger.warning(f"User {message.from_user.id} tried to use /invite without admin rights.")
+        return
+
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("Usage: /invite <telegram_user_id>")
+        return
+
+    invited_tg_id = int(args[1])
+
+    try:
+        invited_user = await user_repo.get_or_create_user(invited_tg_id)
+        await message.answer(f"✅ User {invited_tg_id} has been successfully added to the bot.")
+        
+        # Уведомляем приглашенного пользователя
+        try:
+            await message.bot.send_message(
+                chat_id=invited_tg_id,
+                text="👋 You have been invited to GFP Watcher-QR! Use /start to begin."
+            )
+            logger.info(f"Sent invitation message to user {invited_tg_id}.")
+        except Exception as e:
+            logger.warning(f"Failed to send invitation message to user {invited_tg_id}: {e}")
+            await message.answer(f"⚠️ Could not send invitation message to user {invited_tg_id}. They might have blocked the bot or not started it yet.")
+
+    except Exception as e:
+        logger.error(f"Error inviting user {invited_tg_id}: {e}")
+        await message.answer(f"❌ An error occurred while inviting user {invited_tg_id}.") 
