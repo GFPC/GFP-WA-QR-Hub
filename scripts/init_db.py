@@ -1,4 +1,13 @@
 import asyncio
+import sys
+import os
+
+# Add the project root to sys.path to ensure modules like 'db' can be found
+# This makes imports like 'from db.models import ...' work correctly
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import select

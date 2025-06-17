@@ -20,37 +20,46 @@ if [ ! -d "$VENV_DIR" ]; then
     echo "Virtual environment created."
 fi
 
-# 2. Activate the virtual environment
+# 2. Activate the virtual environment BEFORE changing directory
 echo "Activating virtual environment..."
 source "$VENV_DIR/bin/activate"
 echo "Virtual environment activated."
 
-# 3. Install dependencies
+# 3. CD into project directory for running Python modules/commands
+# This is crucial for correct module imports like 'db'
+pushd "$PROJECT_DIR"
+
+# 4. Install dependencies
 echo "Installing/Upgrading Python dependencies from $REQUIREMENTS_FILE..."
 pip install --no-input --upgrade pip setuptools wheel
 pip install --no-input -r "$REQUIREMENTS_FILE"
 echo "Dependencies installed."
 
-# 4. Run Alembic migrations (assuming Alembic is set up)
+# 5. Run Alembic migrations (assuming Alembic is set up)
 # Note: You might need to configure Alembic correctly beforehand.
-if [ -d "$PROJECT_DIR/alembic" ]; then
+if [ -d "alembic" ]; then # No $PROJECT_DIR here since we are already inside it
     echo "Running Alembic migrations..."
-    alembic upgrade head
+    # alembic must be run from the project root where alembic.ini is
+    "$VENV_DIR/bin/alembic" upgrade head # Explicitly use venv's alembic
     echo "Alembic migrations completed."
 else
     echo "Alembic directory not found, skipping migrations. Please set up Alembic if needed."
 fi
 
-# 5. Initialize database (create tables and default admin user)
-if [ -f "$INIT_DB_SCRIPT" ]; then
+# 6. Initialize database (create tables and default admin user)
+# Run init_db.py as a module to ensure correct package imports
+if [ -f "scripts/init_db.py" ]; then
     echo "Initializing database and ensuring admin user exists..."
-    python "$INIT_DB_SCRIPT"
+    "$VENV_DIR/bin/python" -m scripts.init_db # Explicitly use venv's python and run as module
     echo "Database initialization completed."
 else
     echo "Database initialization script not found, skipping. Please ensure your database is set up."
 fi
 
-# 6. Deactivate the virtual environment
+# Pop back to original directory
+popd
+
+# 7. Deactivate the virtual environment
 deactivate
 echo "Virtual environment deactivated."
 
