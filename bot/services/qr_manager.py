@@ -22,20 +22,20 @@ class QRManager:
         """Get the last QR message ID from cache"""
         if not redis_client:
             return None
-        
+
         key = f"last_qr_msg:{user_id}:{bot_id}"
         msg_id = await redis_client.get(key)
         return int(msg_id) if msg_id else None
-    
+
     @staticmethod
     async def set_last_qr_message(user_id: int, bot_id: str, message_id: int):
         """Cache the last QR message ID"""
         if not redis_client:
             return
-        
+
         key = f"last_qr_msg:{user_id}:{bot_id}"
         await redis_client.set(key, message_id, ex=86400)  # 24 hours TTL
-    
+
     @staticmethod
     async def notify_subscribed_users(bot_id: str, db: AsyncSession, tg_bot):
         """Notify all users subscribed to the bot about QR update (text notification if not authed)"""
@@ -48,33 +48,69 @@ class QRManager:
 
         users = await user_repo.get_users_linked_to_bot(bot_id)
         for user in users:
-            try:
-                data = user.data or {}
-                auth_notifications_sent = data.get("auth_notifications_sent", {})
+            data = user.data or {}
+            auth_notifications_sent = data.get("auth_notifications_sent", {})
 
-                if not bot.authed:
-                    # Бот не авторизован, отправляем текстовое уведомление, если еще не отправляли
-                    if not auth_notifications_sent.get(bot_id, False):
-                        await tg_bot.send_message(
+            if not bot.authed:
+                # Бот не авторизован, отправляем текстовое уведомление, если еще не отправляли
+                if not auth_notifications_sent.get(bot_id, False):
+                    await tg_bot.send_message(
+                        chat_id=user.tg_id,
+                        text=f"⚠️ Bot {bot.name} requires authentication! Please use the 'Auth QR' button if you need to scan the QR code."
+                    )
+                    auth_notifications_sent[bot_id] = True
+                    data["auth_notifications_sent"] = auth_notifications_sent
+                    user.data = data
+                    await user_repo.update_user_data(user.tg_id, data)
+                    logger.info(f"Sent auth required notification to user {user.tg_id} for bot {bot_id}.")
+                qr_code_message = data.get("qr_messages", {}).get(bot_id, None)
+
+                qr = qrcode.QRCode(
+                    version=1,
+                    error_correction=qrcode.constants.ERROR_CORRECT_L,
+                    box_size=10,
+                    border=4,
+                )
+                qr.add_data(bot.current_qr)  # <-- Здесь передаем чистую строку из БД
+                qr.make(fit=True)
+
+                # Создаем изображение QR кода
+                qr_image = qr.make_image(fill_color="black", back_color="white")
+
+                # Сохраняем во временный файл
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_file:
+                    qr_image.save(temp_file.name)
+                    temp_file_path = temp_file.name
+
+                try:
+                    # Создаем FSInputFile из временного файла
+                    qr_file = FSInputFile(temp_file_path)
+
+                    # Обновляем qr код на сообщении с id
+
+                    print("Trying to edit message: ", qr_code_message, "in chat: ", user.tg_id,data)
+                    if qr_code_message:
+                        await tg_bot.edit_message_media(
                             chat_id=user.tg_id,
-                            text=f"⚠️ Bot {bot.name} requires authentication! Please use the 'Auth QR' button if you need to scan the QR code."
+                            message_id=qr_code_message,
+                            media=InputMediaPhoto(media=qr_file,
+                                                  caption=f"🔐 QR Code for {bot.name}\n\nScan this QR code with WhatsApp to authenticate your bot.")
                         )
-                        auth_notifications_sent[bot_id] = True
-                        data["auth_notifications_sent"] = auth_notifications_sent
-                        user.data = data
-                        await user_repo.update_user_data(user.tg_id, data)
-                        logger.info(f"Sent auth required notification to user {user.tg_id} for bot {bot_id}.")
-                else:
-                    # Бот авторизован, убедимся, что флаг сброшен
-                    if auth_notifications_sent.get(bot_id, False):
-                        auth_notifications_sent[bot_id] = False
-                        data["auth_notifications_sent"] = auth_notifications_sent
-                        user.data = data
-                        await user_repo.update_user_data(user.tg_id, data)
-                        logger.info(f"Reset auth required notification flag for user {user.tg_id}, bot {bot_id}.")
 
-            except Exception as e:
-                logger.error(f"Failed to handle auth notification for user {user.tg_id}, bot {bot_id}: {e}")
+                finally:
+                    # Удаляем временный файл
+                    try:
+                        os.unlink(temp_file_path)
+                    except Exception as e:
+                        logger.error(f"Error deleting temporary file: {e}")
+            else:
+                # Бот авторизован, убедимся, что флаг сброшен
+                if auth_notifications_sent.get(bot_id, False):
+                    auth_notifications_sent[bot_id] = False
+                    data["auth_notifications_sent"] = auth_notifications_sent
+                    user.data = data
+                    await user_repo.update_user_data(user.tg_id, data)
+                    logger.info(f"Reset auth required notification flag for user {user.tg_id}, bot {bot_id}.")
 
     @staticmethod
     async def notify_auth_success(bot_id: str, db: AsyncSession, tg_bot):
@@ -91,7 +127,8 @@ class QRManager:
                 data = user.data or {}
                 qr_messages = data.get("qr_messages", {})
                 msg_id = qr_messages.get(bot_id)
-                logger.info(f"Attempting to delete QR message for user {user.tg_id}, bot {bot_id}. Message ID found: {msg_id}")
+                logger.info(
+                    f"Attempting to delete QR message for user {user.tg_id}, bot {bot_id}. Message ID found: {msg_id}")
 
                 if msg_id:
                     try:
@@ -104,9 +141,11 @@ class QRManager:
                         user.data = data
                         await user_repo.update_user_data(user.tg_id, data)
                     except Exception as delete_e:
-                        logger.error(f"Error deleting QR message {msg_id} for user {user.tg_id}, bot {bot_id}: {delete_e}")
+                        logger.error(
+                            f"Error deleting QR message {msg_id} for user {user.tg_id}, bot {bot_id}: {delete_e}")
                 else:
-                    logger.info(f"No QR message ID found in user data for user {user.tg_id}, bot {bot_id}. Message not deleted.")
+                    logger.info(
+                        f"No QR message ID found in user data for user {user.tg_id}, bot {bot_id}. Message not deleted.")
 
                 # Отправляем уведомление об успешной авторизации
                 await tg_bot.send_message(
@@ -122,7 +161,8 @@ class QRManager:
                     data["auth_notifications_sent"] = auth_notifications_sent
                     user.data = data
                     await user_repo.update_user_data(user.tg_id, data)
-                    logger.info(f"Reset auth required notification flag for user {user.tg_id}, bot {bot_id} after successful auth.")
+                    logger.info(
+                        f"Reset auth required notification flag for user {user.tg_id}, bot {bot_id} after successful auth.")
 
             except Exception as e:
                 logger.error(f"Failed to notify user {user.tg_id} about authentication success: {e}")

@@ -1,3 +1,7 @@
+import tempfile
+
+import qrcode
+from aiogram.types import FSInputFile
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 import base64
@@ -144,32 +148,19 @@ async def whatsapp_bot_update_qr(
             data={"bot_id": data.bot_id}
         )
 
-    try:
         # Проверяем формат QR данных
-        qr_data = data.qr_data
+    qr_data = data.qr_data
 
-        # Если QR приходит в формате WhatsApp (строка с запятыми)
-        # if ',' in qr_data:
-        #    # Берем первую часть QR кода (до первой запятой)
-        #    qr_data = qr_data.split(',')[0]
+    # Сохраняем QR код
+    await repo.update_qr(data.bot_id, qr_data)
+    await QRManager.notify_subscribed_users(data.bot_id, db, bot_connector.bot)
 
-        # Сохраняем QR код
-        await repo.update_qr(data.bot_id, qr_data)
-        await QRManager.notify_subscribed_users(data.bot_id, db, bot_connector.bot)
-
-        logger.info(f"QR updated for WhatsApp bot: {data.bot_id}")
-        return WhatsAppBotResponse(
-            success=True,
-            message="QR code updated successfully",
-            data={"bot_id": data.bot_id}
-        )
-    except Exception as e:
-        logger.error(f"Error updating QR code: {e}")
-        return WhatsAppBotResponse(
-            success=False,
-            message=f"Error updating QR code: {str(e)}",
-            data={"bot_id": data.bot_id}
-        )
+    logger.info(f"QR updated for WhatsApp bot: {data.bot_id}")
+    return WhatsAppBotResponse(
+        success=True,
+        message="QR code updated successfully",
+        data={"bot_id": data.bot_id}
+    )
 
 
 @router.post("/whatsapp/update_auth_state", response_model=WhatsAppBotResponse)
@@ -202,9 +193,14 @@ async def whatsapp_bot_update_auth_state(
         users = await user_repo.get_users_linked_to_bot(bot.id)
         for user in users:
             u_data = user.data or {}
-            u_data["auth_notifications_sent"] = False
+            new_auth_notifications_sent = u_data["auth_notifications_sent"]
+            new_auth_notifications_sent.pop(data.bot_id, None)
+            u_data["auth_notifications_sent"] = new_auth_notifications_sent
             user.data = u_data
             await user_repo.update_user_data(user.tg_id, u_data)
+
+    if authed:
+        await repo.delete_qr(data.bot_id)
 
     logger.info(f"Authentication state updated for WhatsApp bot: {data.bot_id}")
 

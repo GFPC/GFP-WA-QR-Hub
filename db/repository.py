@@ -63,7 +63,15 @@ class BotRepository:
             await self.session.rollback()
             logger.error(f"Failed to link bot {bot_id} to user {user_id}: {e}")
             return False
-
+    async def delete_qr(self, bot_id: str) -> bool:
+        result = await self.session.execute(
+            update(Bot)
+            .where(Bot.id == bot_id)
+            .values(current_qr=None)
+        )
+        await self.session.commit()
+        logger.info(f"Deleted QR for bot: {bot_id}")
+        return result.rowcount > 0
 
 class UserRepository:
     def __init__(self, session: AsyncSession):
@@ -121,4 +129,30 @@ class UserRepository:
             select(User.data).where(User.tg_id == tg_id)
         )
         user_data = result.scalar_one_or_none()
-        return user_data and user_data.get("is_admin", False) 
+        return user_data and user_data.get("is_admin", False)
+
+    async def set_qr_message(self, tg_id: int, bot_id: str, message_id: int) -> bool:
+        result = await self.session.execute(
+            select(User).where(User.tg_id == tg_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return False
+        user_data = user.data or {}
+        qr_messages = user_data.get("qr_messages", {})
+        qr_messages[bot_id] = message_id
+        user_data["qr_messages"] = qr_messages
+        await self.session.execute(
+            update(User)
+            .where(User.tg_id == tg_id)
+            .values(data=user_data)
+        )
+        await self.session.commit()
+        logger.info(f"Updated data for user: {tg_id}")
+        return True
+    async def get_qr_message(self, tg_id: int, bot_id: str) -> Optional[int]:
+        result = await self.session.execute(
+            select(User.data).where(User.tg_id == tg_id)
+        )
+        user_data = result.scalar_one_or_none()
+        return user_data.get("qr_messages", {}).get(bot_id)

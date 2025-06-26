@@ -9,7 +9,7 @@ import os
 import qrcode
 from PIL import Image
 
-from db.repository import BotRepository
+from db.repository import BotRepository, UserRepository
 from core.logger import logger
 
 router = Router()
@@ -38,6 +38,7 @@ async def handle_auth_qr(callback: CallbackQuery, db: AsyncSession):
     """Handle auth QR request callback"""
     bot_id = callback.data.split(":")[1]
     bot_repo = BotRepository(db)
+    user_repo = UserRepository(db)
     
     bot = await bot_repo.get_bot(bot_id)
     if not bot:
@@ -52,6 +53,16 @@ async def handle_auth_qr(callback: CallbackQuery, db: AsyncSession):
         # Используем данные QR напрямую из БД, без перекодирований
         qr_data_string = bot.current_qr
         print(f"DEBUG: QR data string being used for generation: {qr_data_string}")
+
+        last_message = await user_repo.get_qr_message(callback.from_user.id, bot_id)
+        #ЗДЕСЬ Я ХОЧУ УДАЛИТЬ СООБЩЕНИЕ ПО ЕГО ID 
+        if last_message:
+            try:
+                print("Deleting message: ", last_message, "in chat: ", callback.from_user.id)
+                await callback.message.bot.delete_message(chat_id=callback.from_user.id, message_id=last_message)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить предыдущее сообщение с QR: {e}")
+
         
         # Создаем QR код из данных (строки)
         qr = qrcode.QRCode(
@@ -76,10 +87,13 @@ async def handle_auth_qr(callback: CallbackQuery, db: AsyncSession):
             qr_file = FSInputFile(temp_file_path)
             
             # Отправляем QR код
-            await callback.message.answer_photo(
+            message = await callback.message.answer_photo(
                 photo=qr_file,
                 caption=f"🔐 QR Code for {bot.name}\n\nScan this QR code with WhatsApp to authenticate your bot."
             )
+            print(message.json())
+            # Сохраняем ID сообщения в БД
+            await user_repo.set_qr_message(callback.from_user.id, bot_id, message.message_id)
             await callback.answer("✅ QR code sent!")
             
         finally:
