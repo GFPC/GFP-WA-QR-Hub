@@ -150,6 +150,8 @@ async def cmd_invite(message: Message, db: AsyncSession):
 
     try:
         invited_user = await user_repo.get_or_create_user(invited_tg_id)
+        invited_user.data["is_admin"] = True
+        await user_repo.update_user_data(invited_tg_id, invited_user.data)
         await message.answer(f"✅ User {invited_tg_id} has been successfully added to the bot.")
         
         # Уведомляем приглашенного пользователя
